@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Van Watch</title>
+<style>
+  :root {
+    --road: #191d24;      /* asphalt */
+    --paper: #f2efe8;     /* map paper */
+    --paint: #e8c547;     /* lane-line yellow */
+    --pine: #3f6b4f;      /* roadside pine */
+    --ink: #23272f;
+    --muted: #7c8492;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.55 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    padding: 0 1.25rem 4rem;
+  }
+  header {
+    max-width: 720px; margin: 0 auto; padding: 3rem 0 1.5rem;
+    border-bottom: 4px double var(--ink);
+  }
+  h1 {
+    font-family: "Avenir Next Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+    font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    font-size: clamp(1.6rem, 5vw, 2.4rem);
+  }
+  h1 .lane { color: transparent; -webkit-text-stroke: 1.5px var(--ink); }
+  .tagline { color: var(--muted); font-style: italic; margin-top: .35rem; }
+  .stamp {
+    display: inline-block; margin-top: .8rem; padding: .15rem .6rem;
+    border: 2px solid var(--pine); color: var(--pine); border-radius: 3px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    font-size: .8rem; letter-spacing: .12em; text-transform: uppercase;
+    transform: rotate(-1.2deg);
+  }
+  ul { max-width: 720px; margin: 1.5rem auto 0; padding: 0; list-style: none; }
+  .card {
+    display: flex; gap: 1.1rem; align-items: baseline;
+    padding: 1rem 0; border-bottom: 1px solid #d8d3c6;
+  }
+  .price {
+    font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    font-weight: 700; font-size: 1.35rem; min-width: 5.2rem;
+    color: var(--road);
+  }
+  .meta a { color: var(--ink); text-decoration-color: var(--paint); text-decoration-thickness: 3px; }
+  .sub, .vin { display: block; color: var(--muted); font-size: .85rem; }
+  .vin { letter-spacing: .06em; }
+  .flag {
+    display: inline-block; margin-top: .2rem; padding: .05rem .45rem;
+    background: var(--paint); color: var(--ink); border-radius: 2px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .empty { padding: 2rem 0; color: var(--muted); font-style: italic; }
+  footer {
+    max-width: 720px; margin: 2.5rem auto 0; color: var(--muted); font-size: .85rem;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Van <span class="lane">Watch</span></h1>
+  <p class="tagline">2021+ Toyota Sienna &middot; AWD hybrid &middot; under $41,500 &middot; nationwide, cheapest first</p>
+  <span class="stamp">checked not yet run</span>
+</header>
+<ul>
+<li class="empty">No live matches under the cap right now. The watcher runs twice daily.</li>
+</ul>
+<footer>Runs twice daily via GitHub Actions. Prices below $24,000 get a caution tag: nationwide cheapest-first surfaces flood-region and rebuilt-title inventory; always pull the Carfax and decode the VIN before travel.</footer>
+</body>
+</html>
