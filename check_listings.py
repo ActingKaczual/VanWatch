@@ -31,6 +31,10 @@ PAGE_LIMIT = 20
 SUSPICIOUS_PRICE = 24000   # nationwide cheapest often = flood/rebuilt; scrutinize
 HIGH_MILES = 120000
 
+# Hard-exclude trims (fabric interior). Word-boundary match so XLE/Limited survive.
+import re
+EXCLUDE_TRIM_RE = re.compile(r"^\s*LE\b", re.IGNORECASE)
+
 STATE_FILE = Path("seen_vins.json")
 DIGEST_FILE = Path("docs/index.html")
 
@@ -290,6 +294,8 @@ def main():
                 continue
             if f["price"] is not None and f["price"] > PRICE_CAP:
                 continue
+            if EXCLUDE_TRIM_RE.search(str(f["trim"])):
+                continue  # LE = fabric interior; XLE/Woodland/Limited/Platinum pass
             matches.append(f)
 
         cursor = (
