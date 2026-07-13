@@ -2,13 +2,22 @@ name: Van Watch
 
 on:
   schedule:
-    # 7am + 7pm Eastern (11:00 / 23:00 UTC during EDT)
-    - cron: "0 11 * * *"
-    - cron: "0 23 * * *"
+    # Hourly shallow poll (newest listings, 1 API call).
+    # The 11:00 UTC run is the daily deep sweep (digest rebuild).
+    - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      deep:
+        description: "Force deep sweep (full digest rebuild)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: van-watch
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -24,12 +33,14 @@ jobs:
         env:
           AUTODEV_API_KEY: ${{ secrets.AUTODEV_API_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FORCE_DEEP: ${{ inputs.deep && '1' || '0' }}
         run: python check_listings.py
 
       - name: Commit state + digest
         run: |
           git config user.name "van-watch-bot"
           git config user.email "actions@users.noreply.github.com"
+          git pull --rebase
           git add seen_vins.json docs/index.html
           git diff --cached --quiet || git commit -m "van watch: update state + digest"
           git push
