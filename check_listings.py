@@ -24,8 +24,14 @@ NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 
 PRICE_CAP = 41500
 MIN_YEAR = 2021            # first hybrid-only Sienna generation
-MAX_PAGES = 15             # nationwide, cheapest-first; stays inside free tier at 2 runs/day
+MAX_PAGES = 15             # deep sweep page budget (once daily)
 PAGE_LIMIT = 20
+
+# Hourly runs do a 1-page "newest first" poll for fast alerts; the digest is
+# rebuilt only by the daily deep sweep (price.asc). Budget: ~960 calls/mo,
+# inside auto.dev's 1,000/mo free tier.
+DEEP_SWEEP_UTC_HOUR = 11
+MAX_PAGES_SHALLOW = 1
 
 # Flag-don't-hide thresholds (listing still shows, with a caution tag)
 SUSPICIOUS_PRICE = 24000   # nationwide cheapest often = flood/rebuilt; scrutinize
@@ -168,7 +174,7 @@ def build_digest(matches: list[dict], checked_at: str):
 </li>"""
         )
 
-    cards = "\n".join(rows) if rows else '<li class="empty">No live matches under the cap right now. The watcher runs twice daily.</li>'
+    cards = "\n".join(rows) if rows else '<li class="empty">No live matches under the cap right now. The watcher runs hourly.</li>'
 
     DIGEST_FILE.write_text(f"""<!DOCTYPE html>
 <html lang="en">
@@ -244,7 +250,7 @@ def build_digest(matches: list[dict], checked_at: str):
 <ul>
 {cards}
 </ul>
-<footer>Runs twice daily via GitHub Actions. Prices below {fmt_money(SUSPICIOUS_PRICE)} get a caution tag: nationwide cheapest-first surfaces flood-region and rebuilt-title inventory; always pull the Carfax and decode the VIN before travel.</footer>
+<footer>Shallow checks run hourly; full sweep daily. Prices below {fmt_money(SUSPICIOUS_PRICE)} get a caution tag: nationwide cheapest-first surfaces flood-region and rebuilt-title inventory; always pull the Carfax and decode the VIN before travel.</footer>
 </body>
 </html>
 """, encoding="utf-8")
@@ -259,18 +265,25 @@ def main():
         except json.JSONDecodeError:
             pass
 
+    now = datetime.now(timezone.utc)
+    deep = now.hour == DEEP_SWEEP_UTC_HOUR or os.environ.get("FORCE_DEEP") == "1"
+
     params = {
         "vehicle.make": "Toyota",
         "vehicle.model": "Sienna",
         "vehicle.year": f"{MIN_YEAR}-2035",
         "retailListing.price": f"1-{PRICE_CAP}",
-        "sort": "retailListing.price.asc",
         "limit": PAGE_LIMIT,
     }
+    if deep:
+        params["sort"] = "retailListing.price.asc"
+    # shallow: omit sort -> API default updatedAt.desc (newest activity first)
+
+    page_budget = MAX_PAGES if deep else MAX_PAGES_SHALLOW
 
     matches: list[dict] = []
     cursor = None
-    for page in range(MAX_PAGES):
+    for page in range(page_budget):
         q = dict(params)
         if cursor:
             q["cursor"] = cursor
@@ -313,15 +326,17 @@ def main():
         body = f"{fmt_miles(m['miles'])} - {loc}\n{m['dealer']}\nVIN {m['vin']}"
         ntfy_push(title, body, m["url"] or None)
 
-    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    build_digest(matches, checked_at)
+    checked_at = now.strftime("%Y-%m-%d %H:%M UTC")
+    if deep:
+        build_digest(matches, checked_at)
 
     STATE_FILE.write_text(
         json.dumps(sorted(seen | {m["vin"] for m in matches}), indent=0)
     )
+    mode = "deep" if deep else "shallow"
     print(
-        f"{len(matches)} live AWD matches under {fmt_money(PRICE_CAP)}; "
-        f"{len(new)} new; digest rebuilt at {checked_at}"
+        f"[{mode}] {len(matches)} AWD matches under {fmt_money(PRICE_CAP)}; "
+        f"{len(new)} new alerted; checked {checked_at}"
     )
 
 
