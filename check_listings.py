@@ -41,6 +41,40 @@ HIGH_MILES = 120000
 import re
 EXCLUDE_TRIM_RE = re.compile(r"^\s*LE\b", re.IGNORECASE)
 
+# Hard-exclude branded titles wherever the listing discloses one.
+SALVAGE_RE = re.compile(
+    r"\b(salvage|rebuilt|rebuildable|reconstructed|branded\s+title|"
+    r"flood(?:ed)?|water\s+damage|hail\s+damage|lemon(?:\s+law)?\s*(?:buyback)?|"
+    r"theft\s+recovery|r[\s-]?title|prior\s+total\s+loss|total(?:ed)?\s+loss|"
+    r"insurance\s+loss|junk\s+title|bonded\s+title|export\s+only)\b",
+    re.IGNORECASE,
+)
+# Phrases like "salvage-free" or "no flood damage" are selling points, not
+# disclosures: strip them before scanning.
+NEGATION_RE = re.compile(
+    r"\b(?:no|not\s+a|never|free\s+of|zero|without)\s+(?:prior\s+)?"
+    r"(?:salvage|rebuilt|rebuildable|reconstructed|flood(?:ed)?|water\s+damage|"
+    r"hail\s+damage|accidents?|total\s+loss|branded\s+title)[\w-]*"
+    r"|\b(?:salvage|flood|accident|damage)[\s-]?free\b",
+    re.IGNORECASE,
+)
+TITLE_FIELDS = (
+    "retailListing.titleStatus",
+    "vehicle.titleStatus",
+    "retailListing.title",
+    "retailListing.condition",
+    "retailListing.description",
+    "history.titleStatus",
+)
+
+
+def is_branded(row: dict) -> bool:
+    for field in TITLE_FIELDS:
+        val = get_path(row, field)
+        if val and SALVAGE_RE.search(NEGATION_RE.sub(" ", str(val))):
+            return True
+    return False
+
 STATE_FILE = Path("seen_vins.json")
 DIGEST_FILE = Path("docs/index.html")
 
@@ -250,7 +284,7 @@ def build_digest(matches: list[dict], checked_at: str):
 <ul>
 {cards}
 </ul>
-<footer>Shallow checks run hourly; full sweep daily. Prices below {fmt_money(SUSPICIOUS_PRICE)} get a caution tag: nationwide cheapest-first surfaces flood-region and rebuilt-title inventory; always pull the Carfax and decode the VIN before travel.</footer>
+<footer>Shallow checks run hourly; full sweep daily. Disclosed salvage/rebuilt/flood titles are excluded automatically. Prices below {fmt_money(SUSPICIOUS_PRICE)} still get a caution tag: some sellers don't disclose; always pull the Carfax and decode the VIN before travel.</footer>
 </body>
 </html>
 """, encoding="utf-8")
@@ -302,6 +336,8 @@ def main():
         for row in rows:
             if not is_awd(row):
                 continue
+            if is_branded(row):
+                continue  # disclosed salvage/rebuilt/flood/lemon title
             f = listing_fields(row)
             if not f["vin"]:
                 continue
