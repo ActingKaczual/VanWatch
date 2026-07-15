@@ -22,15 +22,23 @@ from pathlib import Path
 API_KEY = os.environ["AUTODEV_API_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 
-PRICE_CAP = 41500
+PRICE_CAP = 44000
 MIN_YEAR = 2021            # first hybrid-only Sienna generation
 MAX_PAGES = 15             # deep sweep page budget (once daily)
 PAGE_LIMIT = 20
 
+# Value gate: a listing must be priced at or below its mileage-adjusted
+# ceiling. Calibrated to observed market: ~19c/mi real depreciation on
+# hybrid AWD Siennas; 15c is deliberately lenient so deals surface.
+#   ceiling = VALUE_BASE - VALUE_PER_MILE * miles
+#   50k mi -> $36,500 | 100k mi -> $29,000 | 130k mi -> $24,500
+VALUE_BASE = 44000
+VALUE_PER_MILE = 0.15
+
 # Hourly runs do a 1-page "newest first" poll for fast alerts; the digest is
 # rebuilt only by the daily deep sweep (price.asc). Budget: ~960 calls/mo,
 # inside auto.dev's 1,000/mo free tier.
-DEEP_SWEEP_UTC_HOUR = 11
+DEEP_INTERVAL_HOURS = 20   # any run finding the last deep sweep older than this promotes itself
 MAX_PAGES_SHALLOW = 1
 
 # Flag-don't-hide thresholds (listing still shows, with a caution tag)
@@ -77,6 +85,7 @@ def is_branded(row: dict) -> bool:
 
 STATE_FILE = Path("seen_vins.json")
 DIGEST_FILE = Path("docs/index.html")
+WATCH_STATE_FILE = Path("watch_state.json")
 
 API_BASE = "https://api.auto.dev/listings"
 
@@ -143,6 +152,11 @@ def listing_fields(row: dict) -> dict:
         or get_path(row, "retailListing.dealer") or "",
         "url": get_path(row, "retailListing.vdpUrl")
         or get_path(row, "retailListing.url") or "",
+        "ext": get_path(row, "vehicle.exteriorColor")
+        or get_path(row, "retailListing.exteriorColor")
+        or get_path(row, "vehicle.color") or "",
+        "int": get_path(row, "vehicle.interiorColor")
+        or get_path(row, "retailListing.interiorColor") or "",
     }
 
 
@@ -196,19 +210,25 @@ def build_digest(matches: list[dict], checked_at: str):
         link_open = f'<a href="{html.escape(m["url"])}" target="_blank" rel="noopener">' if m["url"] else "<span>"
         link_close = "</a>" if m["url"] else "</span>"
         loc = ", ".join(p for p in (m["city"], m["state"]) if p)
+        colors = " / ".join(p for p in (m.get("ext", ""), m.get("int", "")) if p)
+        sub_bits = [fmt_miles(m["miles"])]
+        if colors:
+            sub_bits.append(colors)
+        sub_bits.extend([loc, str(m["dealer"])])
+        sub = " &middot; ".join(html.escape(str(b)) for b in sub_bits if b)
         rows.append(
             f"""<li class="card">
   <div class="price">{fmt_money(m["price"])}</div>
   <div class="meta">
     {link_open}{m["year"]} Sienna {html.escape(str(m["trim"]))} AWD{link_close}
-    <span class="sub">{fmt_miles(m["miles"])} &middot; {html.escape(loc)} &middot; {html.escape(str(m["dealer"]))}</span>
+    <span class="sub">{sub}</span>
     {flag_html}
     <span class="vin">{html.escape(m["vin"])}</span>
   </div>
 </li>"""
         )
 
-    cards = "\n".join(rows) if rows else '<li class="empty">No live matches under the cap right now. The watcher runs hourly.</li>'
+    cards = "\n".join(rows) if rows else '<li class="empty">No live matches under the cap right now. The watcher runs twice daily.</li>'
 
     DIGEST_FILE.write_text(f"""<!DOCTYPE html>
 <html lang="en">
@@ -278,13 +298,13 @@ def build_digest(matches: list[dict], checked_at: str):
 <body>
 <header>
   <h1>Van <span class="lane">Watch</span></h1>
-  <p class="tagline">2021+ Toyota Sienna &middot; AWD hybrid &middot; under {fmt_money(PRICE_CAP)} &middot; nationwide, cheapest first</p>
+  <p class="tagline">2021+ Toyota Sienna &middot; AWD hybrid &middot; value-priced under {fmt_money(PRICE_CAP)} &middot; nationwide, cheapest first</p>
   <span class="stamp">checked {checked_at}</span>
 </header>
 <ul>
 {cards}
 </ul>
-<footer>Shallow checks run hourly; full sweep daily. Disclosed salvage/rebuilt/flood titles are excluded automatically. Prices below {fmt_money(SUSPICIOUS_PRICE)} still get a caution tag: some sellers don't disclose; always pull the Carfax and decode the VIN before travel.</footer>
+<footer>Runs twice daily via GitHub Actions. Prices below {fmt_money(SUSPICIOUS_PRICE)} get a caution tag: nationwide cheapest-first surfaces flood-region and rebuilt-title inventory; always pull the Carfax and decode the VIN before travel.</footer>
 </body>
 </html>
 """, encoding="utf-8")
@@ -300,7 +320,16 @@ def main():
             pass
 
     now = datetime.now(timezone.utc)
-    deep = now.hour == DEEP_SWEEP_UTC_HOUR or os.environ.get("FORCE_DEEP") == "1"
+    last_deep = None
+    if WATCH_STATE_FILE.exists():
+        try:
+            raw = json.loads(WATCH_STATE_FILE.read_text()).get("last_deep")
+            if raw:
+                last_deep = datetime.fromisoformat(raw)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    deep_due = last_deep is None or (now - last_deep).total_seconds() > DEEP_INTERVAL_HOURS * 3600
+    deep = deep_due or os.environ.get("FORCE_DEEP") == "1"
 
     params = {
         "vehicle.make": "Toyota",
@@ -345,6 +374,12 @@ def main():
                 continue
             if EXCLUDE_TRIM_RE.search(str(f["trim"])):
                 continue  # LE = fabric interior; XLE/Woodland/Limited/Platinum pass
+            if (
+                f["price"] is not None
+                and f["miles"] is not None
+                and f["price"] > VALUE_BASE - VALUE_PER_MILE * f["miles"]
+            ):
+                continue  # overpriced for the miles
             matches.append(f)
 
         cursor = (
@@ -358,13 +393,19 @@ def main():
     new = [m for m in matches if m["vin"] not in seen]
     for m in new:
         loc = ", ".join(p for p in (m["city"], m["state"]) if p)
+        colors = " / ".join(p for p in (m["ext"], m["int"]) if p)
         title = f"Van Watch: {m['year']} Sienna {m['trim']} AWD {fmt_money(m['price'])}"
-        body = f"{fmt_miles(m['miles'])} - {loc}\n{m['dealer']}\nVIN {m['vin']}"
-        ntfy_push(title, body, m["url"] or None)
+        body_lines = [f"{fmt_miles(m['miles'])} - {loc}"]
+        if colors:
+            body_lines.append(colors)
+        body_lines.append(str(m["dealer"]))
+        body_lines.append(f"VIN {m['vin']}")
+        ntfy_push(title, "\n".join(body_lines), m["url"] or None)
 
     checked_at = now.strftime("%Y-%m-%d %H:%M UTC")
     if deep:
         build_digest(matches, checked_at)
+        WATCH_STATE_FILE.write_text(json.dumps({"last_deep": now.isoformat()}))
 
     STATE_FILE.write_text(
         json.dumps(sorted(seen | {m["vin"] for m in matches}), indent=0)
