@@ -4,7 +4,7 @@ on:
   schedule:
     # Hourly shallow poll (newest listings, 1 API call).
     # The 11:00 UTC run is the daily deep sweep (digest rebuild).
-    - cron: "17 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       deep:
@@ -41,6 +41,6 @@ jobs:
           git config user.name "van-watch-bot"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase
-          git add seen_vins.json docs/index.html
+          git add seen_vins.json docs/index.html watch_state.json
           git diff --cached --quiet || git commit -m "van watch: update state + digest"
           git push
