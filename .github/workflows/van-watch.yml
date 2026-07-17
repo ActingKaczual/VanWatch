@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name "van-watch-bot"
           git config user.email "actions@users.noreply.github.com"
-          git pull --rebase
           git add seen_vins.json docs/index.html watch_state.json
           git diff --cached --quiet || git commit -m "van watch: update state + digest"
+          git pull --rebase
           git push
